@@ -12,8 +12,6 @@ Structure for iteration information.
 - `nf      :: Int64`: number of evaluations of the objective function
 - `ng      :: Int64`: number of evaluations of the partial gradients
 - `nB      :: Int64`: number of evaluations of the approximate Hessian
-- `nquad   :: Int64`: times that a quadratic regularization is employed
-- `ncubic  :: Int64`: times that a cubic regularization is employed
 """
 mutable struct IterInfo
     iter    ::Int64
@@ -25,8 +23,6 @@ mutable struct IterInfo
     nf      ::Int64
     ng      ::Int64
     nB      ::Int64
-    nquad   ::Int64
-    ncubic  ::Int64
 end
 
 mutable struct Param

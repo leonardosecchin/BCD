@@ -60,10 +60,10 @@ using SparseArrays
 
     # B_i
     function B(x, bs, i, data)
-        return (p-1)*transpose(data.A[i]) * spdiagm(min.(abs.(data.Axb).^(p-2), 10^3)) * data.A[i], false
+        return (p-1)*transpose(data.A[i]) * spdiagm(min.(abs.(data.Axb).^(p-2), 10^3)) * data.A[i]
     end
 
-    blocks = create_blocks(3, [1;2;3], fill(1, 3))
+    blocks = create_blocks(3, [1;2;3])
     output = bcd(blocks, f, g!, B, data_initialize; verbose = 0)
     @test output.status == 0
 end

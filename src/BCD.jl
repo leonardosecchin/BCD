@@ -1,5 +1,5 @@
 """
-Block Coordinate Descent methods to minimize Hölder continuous functions.
+Block Coordinate Descent method to minimize Hölder continuous functions.
 """
 module BCD
 
@@ -12,7 +12,6 @@ using Random
 include("basic.jl")
 include("blocks.jl")
 include("descent.jl")
-include("cubic_dyn.jl")
 
 # structures
 export Block, IterInfo, Param
@@ -20,7 +19,6 @@ export Block, IterInfo, Param
 export default_params
 export dec_min, dec_max
 export blk_cyclic, blk_random
-export cubic_dyn
 # main functions
 export create_blocks, bcd
 
@@ -30,7 +28,7 @@ export create_blocks, bcd
 This is the Block Coordinate Descent method described in
 
 `Amaral, Andreani, Secchin, Silva. Flexible block coordinate descent methods
-for unconstrained optimization under Hölder continuity. 2025`
+for unconstrained optimization under Hölder continuity. 2026`
 
 The user must provide the vector `blocks` of `Block` strucure, the functions
 `f` and `g` to evaluate the objective function and its partial gradient, the
@@ -48,18 +46,15 @@ is a `struct` with all necessary stuff for the problem, defined by the user.
 In the function `g!`, `g` is the full gradient and the partial gradient, whose
 entries associated with block index `bid` receive the corresponding partial
 gradient at `x`. Function `f` should return a `Float64`, function `B!` should
-return the matrix `B` in sparse format and a boolean indicating if `B` is
-constant, and `data_initialize` the structure `data` initialized at `x`. Only
-lower triangle of `B` should be provided. Note that fields in `data` are
-modified during the method, so it must be `mutable` if it contains numeric
-fields.
+return the matrix `B` in sparse format, and `data_initialize` the structure
+`data` initialized at `x`. Only lower triangle of `B` should be provided. Note
+that fields in `data` are modified during the method, so it must be `mutable`
+if it contains numeric fields.
 
 `output` is a `IterInfo` structure that contains information about the
 resolution process. In particular, `output.x` is the final iterate and
 `output.status` is the exit status. For a complete list os properties, type
 `?IterInfo`.
-
-Note: cubic regularization needs HSL MA57 working.
 
 ## Exit status (`output.status`)
 
@@ -71,7 +66,7 @@ Note: cubic regularization needs HSL MA57 working.
 - `91`: x0 is inconsistent
 - `92`: error while computing B
 - `93`: invalid B
-- `94`: error while factorizing the Hessian approximation
+- `94`: error while factorizing the Hessian approximation (HSL MA57)
 - `95`: error while solving the subproblem
 
 ## Options
@@ -80,7 +75,6 @@ Note: cubic regularization needs HSL MA57 working.
 - `x0`: initial guess (default `empty`)
 - `user_f`: descent criterion (default `dec_min`)
 - `user_blk`: function for selecting the block (default `blk_random`)
-- `user_cubic`: rule for switching to cubic regularization (default `nothing`)
 - `user_callback`: user-defined callback function (default `nothing`)
 - `seed`: random seed (<0 for any; default `-1`)
 - `verbose`: output level (`1` = standard, `0` = none; default `0`)
@@ -104,17 +98,6 @@ selection, and `opts` receives a vector of the supnorm of each partial gradient.
 `blk_cyclic` (ascending cyclic rule) and `blk_random` (random selecting) are
 pre-implemented and can be passed. If you provide your own function, ensure that
 all blocks are visited during a cycle.
-
-The function `user_cubic` is used to activate cubic regularization for those
-blocks with `blk_type = 0` (type `?Block` for details). The header should be
-
-`user_cubic(si, opts, blocks::Vector{Block}, curr_id, iter::IterInfo, par::Param)`
-
-where `si` is partial direction computed in the current iteration.
-The function must returns `true` (use cubic reg) or `false` (does not use cubic
-reg). The pre-implemented function `cubic_dyn` returns `true` if and
-only if `opts[curr_id] <= sqrt(par.eps)`. The function is called after every
-line search loop.
 
 A callback function can be defined. It is executed at the beginning of each
 iteration, and can be used to set additional stopping criteria. The header is
@@ -141,23 +124,12 @@ function bcd(
     x0                    = [],               # initial guess
     user_dec   ::Function = dec_min,          # descent criteria for f
     user_blk   ::Function = blk_random,       # rule for chosing the next block
-    user_cubic            = nothing,          # rule for switching to cubic regularization
     user_callback         = nothing,          # callback
     seed       ::Int64    = -1,               # random seed
     verbose               = 1                 # output level
 )
 
     @assert length(blocks) > 0 throw(ArgumentError("At least one block must be defined"))
-
-    needcubic = false
-    for i in eachindex(blocks)
-        if blocks[i].blk_type != 1
-            needcubic = true
-            break
-        end
-    end
-
-    @assert (LIBHSL_isfunctional() || !needcubic) throw("At least one block needs cubic regularization, but HSL_jll is not property loaded or installed. Please visit https://github.com/JuliaSmoothOptimizers/HSL.jl for instructions on how install it")
 
     # seed for any randomization
     if seed >= 0
@@ -175,7 +147,7 @@ function bcd(
     end
 
     # initialize iteration information structure
-    iter = IterInfo(0, 9, zeros(Float64, n), Inf, par.sig0, Inf, 0, 0, 0, 0, 0)
+    iter = IterInfo(0, 9, zeros(Float64, n), Inf, par.sig0, Inf, 0, 0, 0)
 
     # initial point
     if !isempty(x0)
@@ -227,8 +199,6 @@ function bcd(
 
     E = 0.0
     S = 0.0
-
-    cubic = false
 
     # print initial banner
     if verbose > 0
@@ -330,19 +300,12 @@ function bcd(
 
         # Instantiate objects associated with factorization
         MA = nothing
-        L  = []
-        D  = []
-        sc = []
-        p  = []
-        Q  = []
-        d  = []
 
-        B_factorized = false
         sisupn = Inf
 
         # compute B
         # only the lower triangle of B must be given
-        Bi, Bi_const = B(iter.x, blocks, bid, data)
+        Bi = B(iter.x, blocks, bid, data)
         iter.nB += 1
 
         if isempty(Bi)
@@ -365,182 +328,72 @@ function bcd(
 
             prev_si .= si
 
-            # dynamic choice of cubic regularization
-            cubic = (blocks[bid].blk_type == 2)
-            if (blocks[bid].blk_type == 0) && !isnothing(user_cubic)
-                cubic = user_cubic(si, opts, blocks, bid, iter, par)
-            end
+            # QUADRATIC REGULARIZATION, descent direction si
 
-            # descent direction si
-            if cubic
+            # BsigI = B + 2sig*I
+            ni = blocks[bid].ni
+            BsigI = Bi + 2.0 * iter.sig * spdiagm(ni, ni, ones(ni))
 
-                # CUBIC REGULARIZATION
-                iter.ncubic += 1
-
-                # factorize B if necessary
-                if !B_factorized
-                    MA = nothing
-                    try
-                        # create Ma57 object
-                        MA = Ma57(Bi)
-                    catch
-                        printiter(iter, bid, verbose, true)
-                        if verbose > 0
-                            @error "ma57 object could not be initalized. Is B valid?"
-                        end
-                        iter.status = 93
-                        return iter
+            if LIBHSL_isfunctional()
+                # HSL is working
+                MA = nothing
+                try
+                    # create Ma57 object
+                    MA = Ma57(BsigI)
+                catch
+                    printiter(iter, bid, verbose, true)
+                    if verbose > 0
+                        @error "ma57 object could not be initalized. Is B valid?"
                     end
-
-                    # factorize
-                    ma57_factorize!(MA)
-
-                    if MA.info.info[1] < 0
-                        printiter(iter, bid, verbose, true)
-                        if verbose > 0
-                            @error "ma57 factorization failed."
-                        end
-                        iter.status = 94
-                        return iter
-                    end
-
-                    # Get factors of the factorization.
-                    # We have
-                    # P * S * BsigI * S * P' = M * D * M'
-                    # where S = spdiagm(s) and P = I(n)[p,:]
-
-                    L, D, sc, p = ma57_get_factors(MA)
-
-                    d = Vector(diag(D))
-                    Q = spdiagm(ones(blocks[bid].ni))
-
-                    if MA.info.num_2x2_pivots > 0
-                        # Computes the spectral decomposition of each 2x2 block
-                        # and adjusts Q, d
-                        k = 1
-                        while (true)
-                            if k >= blocks[bid].ni
-                                break
-                            end
-                            @views if abs(D[k,k+1]) > 1e-14
-                                eigfac!(d, Q, D, k)
-                                k += 2
-                            else
-                                k += 1
-                            end
-                        end
-                    end
-
-                    B_factorized = true
+                    iter.status = 93
+                    return iter
                 end
 
-                # ma57work = g = M^{-1} grad f  where  M = S^-1 * P^t * L * Q
-                # we need to solve Mg = grad f, or equivalently, LQg = PS grad f
+                # factorize
+                ma57_factorize!(MA)
 
-                # solve L(PSx) = PS grad f
-                @views si .= g[blocks[bid].idx]   # rhs
-                ma57_solve!(MA, si, ma57work, job=:LS)
-
-                # solve Mg = grad f, or equivalently, LQg = PS grad f
-                # thus, Qg = PSx  =>  g = Q'PSx  (x = si above)
-                ma57work .= Q' * (si .* sc)[p]
-
-                # ma57work = y*
-                # at this point, ma57work = g
-                for k in eachindex(ma57work)
-                    # solve +/-(3sigma)y^2 + (d)y + (g) = 0, depending on sign(g)
-                    Delta = d[k]^2 + sign(ma57work[k]) * 12.0 * iter.sig * ma57work[k]
-
-                    # as d > 0, we compute first "sqrt(Delta) + d"
-                    num_root = sqrt(Delta) + d[k]
-
-                    # y* is the root such that y*g <= 0
-                    ma57work[k] = (-2.0 * ma57work[k]) / num_root
+                if MA.info.info[1] < 0
+                    printiter(iter, bid, verbose, true)
+                    if verbose > 0
+                        @error "ma57 factorization failed"
+                    end
+                    iter.status = 94
+                    return iter
                 end
 
-                # Direction
-                si .= L' \ (Q' * ma57work)
-                si .= (si .* sc)[p]
+                if (MA.info.num_negative_eigs > 0) && (verbose > 1)
+                    @warn "B + 2sig*I is not positive semidefinite"
+                end
 
-                # norm(M,2) = norm(S^-1 * P^t * L * Q, 2) = norm(S^-1 * L,2)
-                E = (
-                    par.alpha / (sqrt(blocks[bid].ni * iter.sig) * (6.0 * norm(L ./ sc, 2) + 2.0)^1.5)
-                    ) * par.eps^1.5
+                # solve BsigI*s = -g
+                @views si .= -g[blocks[bid].idx]   # rhs
+                ma57_solve!(MA, si, ma57work, job=:A)
 
-                # norm(M'*s, 3) = norm(Q' L' P S^-1 s, 3) = norm(Q' (L' P S^-1 s), 3)
-                S = par.alpha * norm(Q' * (L' * (si ./ sc)[p]), 3)^3
-
+                if MA.info.info[1] < 0
+                    printiter(iter, bid, verbose, true)
+                    if verbose > 0
+                        @error "Subproblem resolution failed (MA57)"
+                    end
+                    iter.status = 95
+                    return iter
+                end
             else
-
-                # QUADRATIC REGULARIZATION
-                iter.nquad += 1
-
-                # BsigI = B + 2sig*I
-                ni = blocks[bid].ni
-                BsigI = Bi + 2.0 * iter.sig * spdiagm(ni, ni, ones(ni))
-
-                if LIBHSL_isfunctional()
-                    # HSL is working
-                    MA = nothing
-                    try
-                        # create Ma57 object
-                        MA = Ma57(BsigI)
-                    catch
-                        printiter(iter, bid, verbose, true)
-                        if verbose > 0
-                            @error "ma57 object could not be initalized. Is B valid?"
-                        end
-                        iter.status = 93
-                        return iter
+                # compute si by the native Julia linear system solver
+                # positiveness is not checked
+                try
+                    @views si .= BsigI \ (-g[blocks[bid].idx])
+                catch
+                    printiter(iter, bid, verbose, true)
+                    if verbose > 0
+                        @error "Subproblem resolution failed (Julia solver)"
                     end
-
-                    # factorize
-                    ma57_factorize!(MA)
-
-                    if MA.info.info[1] < 0
-                        printiter(iter, bid, verbose, true)
-                        if verbose > 0
-                            @error "ma57 factorization failed"
-                        end
-                        iter.status = 94
-                        return iter
-                    end
-
-                    if (MA.info.num_negative_eigs > 0) && (verbose > 1)
-                        @warn "B + 2sig*I is not positive semidefinite"
-                    end
-
-                    # solve BsigI*s = -g
-                    @views si .= -g[blocks[bid].idx]   # rhs
-                    ma57_solve!(MA, si, ma57work, job=:A)
-
-                    if MA.info.info[1] < 0
-                        printiter(iter, bid, verbose, true)
-                        if verbose > 0
-                            @error "Subproblem resolution failed (MA57)"
-                        end
-                        iter.status = 95
-                        return iter
-                    end
-                else
-                    # compute si by the native Julia linear system solver
-                    # positiveness is not checked
-                    try
-                        @views si .= BsigI \ (-g[blocks[bid].idx])
-                    catch
-                        printiter(iter, bid, verbose, true)
-                        if verbose > 0
-                            @error "Subproblem resolution failed (Julia solver)"
-                        end
-                        iter.status = 95
-                        return iter
-                    end
+                    iter.status = 95
+                    return iter
                 end
-
-                E = (par.alpha / (16.0 * iter.sig)) * par.eps^2
-                S = par.alpha * dot(si, si)
-
             end
+
+            E = (par.alpha / (16.0 * iter.sig)) * par.eps^2
+            S = par.alpha * dot(si, si)
 
             sisupn = norm(si, Inf)
 
@@ -598,42 +451,36 @@ end
 function printbanner(blocks::Vector{Block}, par::Param)
     minblksize = maxblksize = blocks[1].ni
     n = 0
-    nquad = 0
-    ncubic = 0
-    nhybrid = 0
     for k in eachindex(blocks)
         minblksize = min(minblksize, blocks[k].ni)
         maxblksize = max(maxblksize, blocks[k].ni)
         n += blocks[k].ni
-        nquad += (blocks[k].blk_type == 1)
-        ncubic += (blocks[k].blk_type == 2)
-        nhybrid += (blocks[k].blk_type == 0)
     end
     println("\nThis is the Block Coordinate Descent method described in")
     println()
     println(" Amaral, Andreani, Secchin, Silva. Flexible block")
     println(" coordinate descent methods for unconstrained")
-    println(" optimization under Hölder continuity. 2025")
+    println(" optimization under Hölder continuity. 2026")
     println()
+    if LIBHSL_isfunctional()
+    println("HSL MA57 is present.\n")
+    end
     println('='^18," Problem statistics ",'='^18)
     @printf("Total number of variables                      %9d\n", n)
     @printf("Number of blocks                               %9d\n", length(blocks))
     @printf("Smallest block size                            %9d\n", minblksize)
     @printf("Largest block size                             %9d\n", maxblksize)
-    @printf("Number of blocks that use only quadratic reg   %9d\n", nquad)
-    @printf("Number of blocks that use only cubic reg       %9d\n", ncubic)
-    @printf("Number of blocks that may use both reg         %9d\n", nhybrid)
     println()
     println('='^22," Parameters ",'='^22)
     @printf("Optimality tolerance                           %9.2e\n", par.eps)
-    @printf("Maximum number of iterations                   %9d\n", par.maxit)
+    @printf("Maximum number of iterations                   %9d\n"  , par.maxit)
     @printf("Acceptable objetive value                      %9.2e\n", par.fest)
     @printf("Initial penalization (σ)                       %9.2e\n", par.sig0)
     @printf("Maximum penalization allowed                   %9.2e\n", par.maxsig)
     @printf("α                                              %9.2e\n", par.alpha)
     @printf("θ                                              %9.2e\n", par.theta)
-    @printf("Max number of iterations without improvement   %9d\n",
-            (par.maxfnoimpr > 0) ? par.maxfnoimpr : 2 * length(blocks))
+    @printf("Max number of iterations without improvement   %9d\n"  ,
+        (par.maxfnoimpr > 0) ? par.maxfnoimpr : 2 * length(blocks))
     println('='^56)
 end
 

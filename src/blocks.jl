@@ -4,66 +4,48 @@ Structure for store block information.
 ## Fields
 - `ni       :: Int64`: number of variables
 - `idx      :: Vector{Cint}`: variable indices
-- `blk_type :: Int64`: block type
-
-## Block types
-
-- `0`: hybrid (default)
-- `1`: only quadratic regularization
-- `2`: only cubic regularization
-
-When `blk_type = 0`, quadratic regularization unless `user_cubic` function
-returns `true`. Type `?bcd` for details.
-
-Note: cubic regularization needs HSL MA57 working.
 """
 struct Block
     ni      ::Int64
     idx     ::Vector{Cint}
-    blk_type::Int64
 end
 
 """
-    blocks = create_blocks(nblocks, idx, blk_type)
+    blocks = create_blocks(nblocks, idx)
 
-Returns a vector of `Block` structure given the number of blocks `nblocks`,
-a vector of block indices for each variable `idx` and a vector of integers
-`blk_type` indicating where type of regularization should be used for each
-block. For better efficiency, place the indexes in `idx` in non-descending
-order if possible.
+Returns a vector of `Block` structure given the number of blocks `nblocks`
+and a vector of block indices for each variable `idx`. For better efficiency,
+place the indexes in `idx` in non-descending order if possible.
 
 `Block` structure is immutable, so its properties can not be changed after its
-creation. Type `?Blocks` for details on `blk_type`.
+creation.
 
 ## Examples
 
 Creating 3 blocks, the first formed by variables 1, 2 and 3, the second by
-variables 4 and 5 and the third by variable 6, where cubic regularization is
-indicated for the first:
+variables 4 and 5 and the third by variable 6:
 
-`blocks = create_blocks(3, [1;1;1;2;2;3], [2; 1; 1])`\\
+`blocks = create_blocks(3, [1;1;1;2;2;3])`\\
 `3-element Vector{Block}:`\\
- `Block(3, Int32[1, 2, 3], 2)`\\
- `Block(2, Int32[4, 5], 1)`\\
- `Block(1, Int32[6], 1)`
+ `Block(3, Int32[1, 2, 3])`\\
+ `Block(2, Int32[4, 5])`\\
+ `Block(1, Int32[6])`
 
-Creating `n` blocks, one for each variable, all using only cubic regularization:
+Creating `n` blocks, one for each variable:
 
 `n = 10`\\
-`blocks = create_blocks(n, 1:n, fill(2,n))`
+`blocks = create_blocks(n, 1:n)`
 """
-function create_blocks(nblocks, idx, blk_type)
+function create_blocks(nblocks, idx)
     @assert nblocks > 0 throw(ArgumentError("Invalid number of blocks"))
-    @assert length(blk_type) == nblocks throw(ArgumentError("Invalid 'blk_type' vector"))
 
     n = 0
     blocks = Block[]
     for i = 1:nblocks
-        @assert blk_type[i] in [0;1;2] throw("Invalid block type flag")
         idxs = consec_range((1:length(idx))[idx .== i])
         @assert length(idxs) > 0 throw("Empty block found")
         n += length(idxs)
-        push!(blocks, Block(length(idxs), Cint.(idxs), blk_type[i]))
+        push!(blocks, Block(length(idxs), Cint.(idxs)))
     end
     @assert n == length(idx) throw("Blocks and variables do not match")
 

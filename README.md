@@ -1,14 +1,16 @@
 # BCD
 
-This is a Julia implementation of the Block Coordinate Descent (BCD) method with quadratic and cubic regularizations for minimizing functions with Hölder continuous gradient, as described in
+This is a Julia implementation of the Block Coordinate Descent (BCD) method with quadratic regularization for minimizing functions with Hölder continuous gradient, as described in
 
-Amaral, Andreani, Secchin, Silva. Flexible block coordinate descent methods for unconstrained optimization under Hölder continuity. 2025
+Amaral, Andreani, Secchin, Silva. Flexible block coordinate descent methods for unconstrained optimization under Hölder continuity. 2026
 
 ## Installation and use
 
 `]add https://github.com/leonardosecchin/BCD.git`
 
-For usage instructions, type `?bcd` after load the package `BCD`. Cubic regularization needs HSL MA57 working. Please visit <https://github.com/JuliaSmoothOptimizers/HSL.jl> for instructions on how install it. For proper working, load HSL package before the BCD:
+For usage instructions, type `?bcd` after load the package `BCD`. If HSL MA57 is installed, it is used; otherwise, linear systems are solved by Julia's built-in solver.
+
+Please visit <https://github.com/JuliaSmoothOptimizers/HSL.jl> for instructions on how install HSL MA57. For proper working, load HSL package before the BCD:
 
 ```
 using HSL
@@ -27,4 +29,4 @@ This research was supported by the National Council for Scientific and Technolog
 
 If you use this code in your publications, please cite us. For now, you can cite the preprint:
 
-Amaral, Andreani, Secchin, Silva. Flexible block coordinate descent methods for unconstrained optimization under Hölder continuity. 2025
+Amaral, Andreani, Secchin, Silva. Flexible block coordinate descent methods for unconstrained optimization under Hölder continuity. 2026
