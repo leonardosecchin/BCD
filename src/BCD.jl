@@ -182,7 +182,7 @@ function bcd(
     ma57work = similar(xi)
 
     # indexes of eligible blocks
-    elegible_blks = trues(length(blocks))
+    eligible_blks = trues(length(blocks))
 
     # block index
     bid = 0
@@ -246,17 +246,17 @@ function bcd(
         lastf[mod(iter.iter, maxfnoimpr) + 1] = iter.f
 
         # turn all blocks elegible
-        elegible_blks .= true
+        eligible_blks .= true
 
         # is current blk prohibited?
         if prohibited_blk
-            elegible_blks[bid] = false
+            eligible_blks[bid] = false
         end
 
         # stationarity test and block choice
         while (true)
             # test whether iter.x is stationary (no block is elegible)
-            if !any(elegible_blks)
+            if !any(eligible_blks)
                 printiter(iter, bid, verbose, true)
                 if verbose > 0
                     println("\nEXIT STATUS: An approximate stationary point was found")
@@ -266,7 +266,7 @@ function bcd(
             end
 
             # choose a block
-            bid = user_blk(blocks, bid, elegible_blks, opts)
+            bid = user_blk(blocks, bid, eligible_blks, opts)
 
             # compute partial grad f
             g!(g, iter.x, blocks, bid, data)
@@ -277,7 +277,7 @@ function bcd(
 
             if opts[bid] <= par.eps
                 # remove bid from C
-                elegible_blks[bid] = false
+                eligible_blks[bid] = false
             else
                 # resize working vectors to handle ma57 objects correctly
                 resize!(ma57work, blocks[bid].ni)

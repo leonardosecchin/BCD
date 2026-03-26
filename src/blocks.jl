@@ -56,14 +56,14 @@ end
 """
 Cyclical selection of blocks in ascending order.
 """
-function blk_cyclic(blocks, curr_id, elegible, opts)
+function blk_cyclic(blocks, curr_id, eligible, opts)
     return mod(curr_id, length(blocks)) + 1
 end
 
 function blk_random!()
     perm = []
     counter = 0
-    function rand_bid(blocks, curr_id, elegible, opts)
+    function rand_bid(blocks, curr_id, eligible, opts)
         if curr_id < 0
             counter = 0
             return
