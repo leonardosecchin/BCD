@@ -69,8 +69,13 @@ function blk_random!()
             return
         end
         counter = mod(counter, length(blocks)) + 1
+        # current cycle ends, restart it
         if counter == 1
             perm = randperm(length(blocks))
+        end
+        # choose next eligible block in the permutation
+        while (counter < length(blocks)) && !eligible[perm[counter]]
+            counter += 1
         end
         return perm[counter]
     end
@@ -78,7 +83,42 @@ function blk_random!()
 end
 
 """
-Random selection of blocks, which guarantees that all blocks are visited in
-each cycle.
+Random selection of blocks.
 """
 blk_random = blk_random!()
+
+function blk_max!()
+    visited = []
+    function max_bid(blocks, curr_id, eligible, opts)
+        if curr_id < 0
+            return
+        end
+        # initialize vector of visited blocks in the current cycle
+        if isempty(visited)
+            visited = falses(length(blocks))
+        end
+        # discard non-eligible blocks
+        for k in 1:length(blocks)
+            if !eligible[k]
+                visited[k] = true
+            end
+        end
+        # choose the unvisited block with the largest violation
+        p = sortperm(opts, rev = true)
+        if all(visited)
+            # current cycle ends, restart it
+            visited .= false
+            bid = 1
+        else
+            bid = findfirst(.!visited[p])
+        end
+        visited[p[bid]] = true
+        return p[bid]
+    end
+    return max_bid
+end
+
+"""
+Select the block with the greatest violation of optimality first.
+"""
+blk_max = blk_max!()
