@@ -18,7 +18,7 @@ export Block, IterInfo, Param
 # auxiliary functions
 export default_params
 export dec_min, dec_max
-export blk_cyclic, blk_random
+export blk_cyclic, blk_random, blk_max
 # main functions
 export create_blocks, bcd
 
