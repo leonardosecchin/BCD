@@ -90,12 +90,10 @@ blk_random = blk_random!()
 function blk_max!()
     visited = []
     function max_bid(blocks, curr_id, eligible, opts)
+        # initialize vector of visited blocks
         if curr_id < 0
-            return
-        end
-        # initialize vector of visited blocks in the current cycle
-        if isempty(visited)
             visited = falses(length(blocks))
+            return
         end
         # discard non-eligible blocks
         for k in 1:length(blocks)
@@ -119,6 +117,6 @@ function blk_max!()
 end
 
 """
-Select the block with the greatest violation of optimality first.
+Select the block with the largest violation of optimality first.
 """
 blk_max = blk_max!()

@@ -136,7 +136,7 @@ function bcd(
         Random.seed!(seed)
     end
 
-    blk_random(blocks, -1, falses(length(blocks)), fill(Inf, length(blocks)))
+    user_blk(blocks, -1, falses(length(blocks)), fill(Inf, length(blocks)))
 
     # total and maximum number of variables in blocks
     n = 0
