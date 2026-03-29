@@ -254,7 +254,7 @@ end
 if abspath(PROGRAM_FILE) == @__FILE__
     # Cyclic selection
     println("Cyclic selecion...")
-    for ni in [100;200]#[20;50;100;200;300;400]
+    for ni in [20;50;100;200;300;400]
         run_tests(target_ni = ni, user_blk = blk_cyclic)
     end
 
