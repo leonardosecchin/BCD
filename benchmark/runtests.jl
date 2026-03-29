@@ -1,0 +1,270 @@
+using HSL
+using BCD
+using LinearAlgebra
+using SparseArrays
+using MKL
+using Pkg
+using Random
+using DataFrames
+using JLD2
+using Metis
+using MatrixDepot
+
+include("jld2_read.jl")
+include("results.jl")
+
+Random.seed!(0)
+
+matrices = [
+# "Priebel/162bit",
+# "Priebel/176bit",
+# "JGD_Homology/ch6-6-b3",
+# "JGD_Homology/ch7-6-b3",
+# "JGD_Homology/ch7-8-b2",
+# "JGD_Homology/ch7-9-b2",
+# "JGD_Homology/cis-n4c6-b3",
+"JGD_Franz/Franz4",
+"JGD_Franz/Franz5"
+# "JGD_Franz/Franz6",
+# "JGD_Franz/Franz7",
+# "JGD_Franz/Franz8",
+# "JGD_Franz/Franz9",
+# "JGD_Franz/Franz10",
+# "JGD_GL7d/GL7d12",
+# "Kemelmacher/Kemelmacher",
+# "NYPA/Maragal_5",
+# "NYPA/Maragal_4",
+# "JGD_Homology/mk10-b3",
+# "JGD_Homology/mk11-b3",
+# "JGD_Homology/mk12-b2",
+# "JGD_Homology/n2c6-b4",
+# "JGD_Homology/n2c6-b5",
+# "JGD_Homology/n2c6-b6",
+# "JGD_Homology/n3c6-b4",
+# "JGD_Homology/n3c6-b5",
+# "JGD_Homology/n3c6-b6",
+# "JGD_Homology/n4c5-b4",
+# "JGD_Homology/n4c5-b5",
+# "JGD_Homology/n4c5-b6",
+# "JGD_Homology/n4c6-b3",
+]
+
+struct DATA
+    A::Vector{SparseMatrixCSC{Float64, Int64}}
+    Axb::Vector{Float64}
+    Axi::Vector{Vector{Float64}}
+    Axtmp::Vector{Float64}
+    B::Vector{SparseMatrixCSC{Float64, Int64}}
+    b::Vector{Float64}
+end
+
+function download_matrices()
+    problems = DataFrame(
+        [
+            "name" => String[]
+            "A" => SparseMatrixCSC{Float64, Int64}[]
+            "b" => Vector{Float64}[]
+        ]
+    )
+    for m in matrices
+        M = mdopen(m)
+        A = deepcopy(M.A)
+        b = rand(size(A,1))
+        push!(problems, [m, A, b])
+    end
+    jldsave("lp-lsq.jld2"; problems)
+end
+
+function solve(
+    A, b; nb = 10, verbose = 1, p = 1.5, usemetis = false, x0 = [], user_blk = blk_cyclic
+)
+    @assert length(b) == size(A,1) "Dimensions mismatch"
+
+    n = size(A, 2)
+
+    # function to allocate and initialize data
+    function data_initialize(x, bs)
+        data = DATA(
+            SparseMatrixCSC{Float64, Int64}[],
+            zeros(length(b)),
+            Vector{Float64}[],
+            Vector{Float64}(undef, size(A,1)),
+            SparseMatrixCSC{Float64, Int64}[],
+            b
+        )
+        for i in 1:length(bs)
+            push!(data.A, sparse(A[:,bs[i].idx]))
+            push!(data.Axi, data.A[i] * x[bs[i].idx])
+            push!(data.B, tril(transpose(data.A[i]) * data.A[i]))
+            dropzeros!(data.B[end])
+        end
+        for j in 1:length(bs)
+            data.Axb .+= data.Axi[j]
+        end
+        data.Axb .-= data.b
+        return data
+    end
+
+    # f(x) = 1/p |Ax - b|_p^p
+    function f(x, bs, i, data)
+        @inbounds begin
+            # compute Ai * xi
+            data.Axtmp .= data.Axi[i]
+            @views data.Axi[i] .= data.A[i] * x[bs[i].idx]
+            # update A*x - b
+            @. data.Axb += data.Axi[i] - data.Axtmp
+        end
+        return (1/p) * norm(data.Axb, p)^p
+    end
+
+    # partial gradient
+    function g!(g, x, bs, i, data)
+        if p == 2.0
+            @inbounds @views g[bs[i].idx] .= transpose(data.A[i]) * data.Axb
+        else
+            @inbounds @views g[bs[i].idx] .= transpose(data.A[i]) * (abs.(data.Axb).^(p-1) .* sign.(data.Axb))
+        end
+    end
+
+    # update B_i
+    function B(x, bs, i, data)
+        @inbounds ni = bs[i].ni
+        @inbounds if p == 2.0
+            return transpose(data.A[i]) * data.A[i] + 1e-6*spdiagm(ni, ni, ones(ni))
+        else
+            return (p-1)*transpose(data.A[i]) * spdiagm(min.(abs.(data.Axb).^(p-2), 10^3)) * data.A[i] + 1e-6*spdiagm(ni, ni, ones(ni))
+        end
+    end
+
+    if usemetis
+        H = A'*A
+        dropzeros!(H)
+        bl_idx = Metis.partition(H, nb)
+    else
+        bl_idx = Vector{Int64}(undef, n)
+
+        # consecutive blocks with balanced size
+        len, inc = divrem(n, nb)
+        start = 1
+        for i in 1:inc
+            bl_idx[start:(start + len)] .= i
+            start += len + 1
+        end
+        for i in (inc + 1):nb
+            bl_idx[start:(start + len - 1)] .= i
+            start += len
+        end
+    end
+    blocks = create_blocks(nb, bl_idx)
+
+    par = default_params()
+    par.eps = 1e-3
+    par.alpha = 1e-4
+    par.maxit = max(5000, 100 * nb)
+    par.maxfnoimpr = ceil(Int64, par.maxit/5)
+
+    time = @elapsed output = bcd(
+        blocks, f, g!, B, data_initialize;
+        par = par,
+        user_blk = user_blk,
+        x0 = x0,
+        verbose = verbose
+    )
+
+    return output, time
+end
+
+function run_tests(;
+    p = 1.5, target_ni = 100, run_id = 0, usemetis = false, user_blk = user_blk
+)
+    outfile = "results.jld2"
+
+    if isfile(outfile)
+        jld2file = jldopen(outfile, "r")
+        results = read(jld2file, "results")
+        close(jld2file)
+    else
+        results = DataFrame(
+            [
+            "run_id" => Int64[]
+            "instance" => String[]
+            "size" => []
+            "target_ni" => Int64[]
+            "nblocks" => Int64[]
+            "p" => Float64[]
+            "f" => Float64[]
+            "gsupn" => Float64[]
+            "st" => []
+            "iter" => Int64[]
+            "time" => Float64[]
+            "output" => IterInfo[]
+            ]
+        )
+    end
+
+    problems = jld2_read("lp-lsq.jld2", "problems")
+    if isnothing(problems)
+        try
+            println("Downloading matrices...")
+            download_matrices()
+            problems = jld2_read("lp-lsq.jld2", "problems")
+        catch
+            error("Error while downloading matrices! Delete 'lp-lsq.jld2' and try again.")
+        end
+    end
+
+    for P in eachrow(problems)
+        nb = ceil(Int64, size(P.A,2)/target_ni)
+
+        print("Instance $(P.name), S = $(target_ni), p = $(p)")
+        if !isempty(
+            results[
+            (results.run_id .== run_id) .&
+            (results.instance .== P.name) .&
+            (results.nblocks .== nb) .&
+            (results.p .== p),:]
+        )
+            println(" -- already executed")
+            continue
+        end
+        println()
+
+        try
+            out, time = solve(
+                P.A, P.b;
+                nb = nb,
+                user_blk = user_blk,
+                usemetis = usemetis,
+                p = p,
+                verbose = 0
+            )
+
+            row = [run_id; P.name; size(P.A); target_ni; nb;
+                p; out.f; out.opt; out.status; out.iter; time; out
+            ]
+            push!(results, (row))
+
+            jldsave(outfile; results)
+        catch err
+            println("ERROR: $(err)")
+        end
+    end
+end
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    # Cyclic selection
+    println("Cyclic selecion...")
+    for ni in [100;200]#[20;50;100;200;300;400]
+        run_tests(target_ni = ni, user_blk = blk_cyclic)
+    end
+
+    # Cyclic selection with Metis
+    println("Cyclic selection with Metis...")
+    run_tests(target_ni = 100, run_id = 1, usemetis = true, user_blk = blk_cyclic)
+
+    # Results
+    println("Compiling results...")
+    lplsq_table()
+    pp_blk()
+    pp_S()
+end
