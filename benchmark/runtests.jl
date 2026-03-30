@@ -16,37 +16,37 @@ include("results.jl")
 Random.seed!(0)
 
 matrices = [
-# "Priebel/162bit",
-# "Priebel/176bit",
-# "JGD_Homology/ch6-6-b3",
-# "JGD_Homology/ch7-6-b3",
-# "JGD_Homology/ch7-8-b2",
-# "JGD_Homology/ch7-9-b2",
-# "JGD_Homology/cis-n4c6-b3",
+"Priebel/162bit",
+"Priebel/176bit",
+"JGD_Homology/ch6-6-b3",
+"JGD_Homology/ch7-6-b3",
+"JGD_Homology/ch7-8-b2",
+"JGD_Homology/ch7-9-b2",
+"JGD_Homology/cis-n4c6-b3",
 "JGD_Franz/Franz4",
-"JGD_Franz/Franz5"
-# "JGD_Franz/Franz6",
-# "JGD_Franz/Franz7",
-# "JGD_Franz/Franz8",
-# "JGD_Franz/Franz9",
-# "JGD_Franz/Franz10",
-# "JGD_GL7d/GL7d12",
-# "Kemelmacher/Kemelmacher",
-# "NYPA/Maragal_5",
-# "NYPA/Maragal_4",
-# "JGD_Homology/mk10-b3",
-# "JGD_Homology/mk11-b3",
-# "JGD_Homology/mk12-b2",
-# "JGD_Homology/n2c6-b4",
-# "JGD_Homology/n2c6-b5",
-# "JGD_Homology/n2c6-b6",
-# "JGD_Homology/n3c6-b4",
-# "JGD_Homology/n3c6-b5",
-# "JGD_Homology/n3c6-b6",
-# "JGD_Homology/n4c5-b4",
-# "JGD_Homology/n4c5-b5",
-# "JGD_Homology/n4c5-b6",
-# "JGD_Homology/n4c6-b3",
+"JGD_Franz/Franz5",
+"JGD_Franz/Franz6",
+"JGD_Franz/Franz7",
+"JGD_Franz/Franz8",
+"JGD_Franz/Franz9",
+"JGD_Franz/Franz10",
+"JGD_GL7d/GL7d12",
+"Kemelmacher/Kemelmacher",
+"NYPA/Maragal_5",
+"NYPA/Maragal_4",
+"JGD_Homology/mk10-b3",
+"JGD_Homology/mk11-b3",
+"JGD_Homology/mk12-b2",
+"JGD_Homology/n2c6-b4",
+"JGD_Homology/n2c6-b5",
+"JGD_Homology/n2c6-b6",
+"JGD_Homology/n3c6-b4",
+"JGD_Homology/n3c6-b5",
+"JGD_Homology/n3c6-b6",
+"JGD_Homology/n4c5-b4",
+"JGD_Homology/n4c5-b5",
+"JGD_Homology/n4c5-b6",
+"JGD_Homology/n4c6-b3"
 ]
 
 struct DATA
@@ -130,9 +130,9 @@ function solve(
     function B(x, bs, i, data)
         @inbounds ni = bs[i].ni
         @inbounds if p == 2.0
-            return transpose(data.A[i]) * data.A[i] + 1e-6*spdiagm(ni, ni, ones(ni))
+            return transpose(data.A[i]) * data.A[i] #+ 1e-6*spdiagm(ni, ni, ones(ni))
         else
-            return (p-1)*transpose(data.A[i]) * spdiagm(min.(abs.(data.Axb).^(p-2), 10^3)) * data.A[i] + 1e-6*spdiagm(ni, ni, ones(ni))
+            return (p-1)*transpose(data.A[i]) * spdiagm(min.(abs.(data.Axb).^(p-2), 10^3)) * data.A[i] #+ 1e-6*spdiagm(ni, ni, ones(ni))
         end
     end
 
@@ -175,7 +175,7 @@ function solve(
 end
 
 function run_tests(;
-    p = 1.5, target_ni = 100, run_id = 0, usemetis = false, user_blk = user_blk
+    p = 1.5, target_ni = 10.0, run_id = 0, usemetis = false, user_blk = user_blk
 )
     outfile = "results.jld2"
 
@@ -189,7 +189,7 @@ function run_tests(;
             "run_id" => Int64[]
             "instance" => String[]
             "size" => []
-            "target_ni" => Int64[]
+            "target_ni" => Float64[]
             "nblocks" => Int64[]
             "p" => Float64[]
             "f" => Float64[]
@@ -214,9 +214,9 @@ function run_tests(;
     end
 
     for P in eachrow(problems)
-        nb = ceil(Int64, size(P.A,2)/target_ni)
+        nb = ceil(Int64, 100.0/target_ni)
 
-        print("Instance $(P.name), S = $(target_ni), p = $(p)")
+        print("Instance $(P.name), ni = $(target_ni), p = $(p)")
         if !isempty(
             results[
             (results.run_id .== run_id) .&
@@ -254,13 +254,13 @@ end
 if abspath(PROGRAM_FILE) == @__FILE__
     # Cyclic selection
     println("Cyclic selecion...")
-    for ni in [20;50;100;200;300;400]
+    for ni in [0.5;1.0;5.0;10.0;15.0;20.0]
         run_tests(target_ni = ni, user_blk = blk_cyclic)
     end
 
     # Cyclic selection with Metis
     println("Cyclic selection with Metis...")
-    run_tests(target_ni = 100, run_id = 1, usemetis = true, user_blk = blk_cyclic)
+    run_tests(target_ni = 10.0, run_id = 1, usemetis = true, user_blk = blk_cyclic)
 
     # Results
     println("Compiling results...")
